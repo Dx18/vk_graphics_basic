@@ -1,5 +1,8 @@
 #include "simple_compute.h"
 
+#include <random>
+#include <chrono>
+
 #include <vk_pipeline.h>
 #include <vk_buffers.h>
 #include <vk_utils.h>
@@ -73,37 +76,34 @@ void SimpleCompute::CreateDevice(uint32_t a_deviceId)
 void SimpleCompute::SetupSimplePipeline()
 {
   std::vector<std::pair<VkDescriptorType, uint32_t> > dtypes = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             3}
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             2}
   };
 
   // Создание и аллокация буферов
-  m_A = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+  m_array = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-  m_B = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-  m_sum = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+  m_result = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-  vk_utils::allocateAndBindWithPadding(m_device, m_physicalDevice, {m_A, m_B, m_sum}, 0);
+  vk_utils::allocateAndBindWithPadding(m_device, m_physicalDevice, {m_array, m_result}, 0);
 
   m_pBindings = std::make_shared<vk_utils::DescriptorMaker>(m_device, dtypes, 1);
 
   // Создание descriptor set для передачи буферов в шейдер
   m_pBindings->BindBegin(VK_SHADER_STAGE_COMPUTE_BIT);
-  m_pBindings->BindBuffer(0, m_A);
-  m_pBindings->BindBuffer(1, m_B);
-  m_pBindings->BindBuffer(2, m_sum);
+  m_pBindings->BindBuffer(0, m_array);
+  m_pBindings->BindBuffer(1, m_result);
   m_pBindings->BindEnd(&m_sumDS, &m_sumDSLayout);
 
+  // Рандом
+  std::mt19937 random(std::random_device{}());
+  std::normal_distribution<float> genValue;
+
   // Заполнение буферов
-  std::vector<float> values(m_length);
-  for (uint32_t i = 0; i < values.size(); ++i) {
-    values[i] = (float)i;
+  m_values.resize(m_length);
+  for (uint32_t i = 0; i < m_values.size(); ++i) {
+    m_values[i] = genValue(random);
   }
-  m_pCopyHelper->UpdateBuffer(m_A, 0, values.data(), sizeof(float) * values.size());
-  for (uint32_t i = 0; i < values.size(); ++i) {
-    values[i] = (float)i * i;
-  }
-  m_pCopyHelper->UpdateBuffer(m_B, 0, values.data(), sizeof(float) * values.size());
+  m_pCopyHelper->UpdateBuffer(m_array, 0, m_values.data(), sizeof(float) * m_values.size());
 }
 
 void SimpleCompute::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkPipeline)
@@ -122,7 +122,7 @@ void SimpleCompute::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkPipeli
 
   vkCmdPushConstants(a_cmdBuff, m_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(m_length), &m_length);
 
-  vkCmdDispatch(a_cmdBuff, 1, 1, 1);
+  vkCmdDispatch(a_cmdBuff, (m_length - 1) / 1024 + 1, 1, 1);
 
   VK_CHECK_RESULT(vkEndCommandBuffer(a_cmdBuff));
 }
@@ -135,9 +135,8 @@ void SimpleCompute::CleanupPipeline()
     vkFreeCommandBuffers(m_device, m_commandPool, 1, &m_cmdBufferCompute);
   }
 
-  vkDestroyBuffer(m_device, m_A, nullptr);
-  vkDestroyBuffer(m_device, m_B, nullptr);
-  vkDestroyBuffer(m_device, m_sum, nullptr);
+  vkDestroyBuffer(m_device, m_array, nullptr);
+  vkDestroyBuffer(m_device, m_result, nullptr);
 
   vkDestroyPipelineLayout(m_device, m_layout, nullptr);
   vkDestroyPipeline(m_device, m_pipeline, nullptr);
@@ -217,15 +216,65 @@ void SimpleCompute::Execute()
   fenceCreateInfo.flags = 0;
   VK_CHECK_RESULT(vkCreateFence(m_device, &fenceCreateInfo, NULL, &m_fence));
 
-  // Отправляем буфер команд на выполнение
-  VK_CHECK_RESULT(vkQueueSubmit(m_computeQueue, 1, &submitInfo, m_fence));
+  {
+    std::cout << "Measuring the time of execution on GPU + CPU..."
+              << std::endl;
 
-  //Ждём конца выполнения команд
-  VK_CHECK_RESULT(vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, 100000000000));
+    auto startTime = std::chrono::steady_clock::now();
 
-  std::vector<float> values(m_length);
-  m_pCopyHelper->ReadBuffer(m_sum, 0, values.data(), sizeof(float) * values.size());
-  for (auto v: values) {
-    std::cout << v << ' ';
+    // Отправляем буфер команд на выполнение
+    VK_CHECK_RESULT(vkQueueSubmit(m_computeQueue, 1, &submitInfo, m_fence));
+
+    // Ждём конца выполнения команд
+    VK_CHECK_RESULT(vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, 100000000000));
+
+    std::vector<float> values(m_length);
+    m_pCopyHelper->ReadBuffer(m_result, 0, values.data(), sizeof(float) * values.size());
+
+    float sum = 0.0;
+    int length = values.size();
+    for (int i = 0; i < length; ++i)
+    {
+      sum += values[i];
+    }
+
+    auto endTime = std::chrono::steady_clock::now();
+    auto elapsedTime = endTime - startTime;
+
+    double elapsedTimeMillis = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(elapsedTime).count();
+
+    std::cout << "  Finished in " << elapsedTimeMillis << "ms\n"
+              << "  The result is " << sum << std::endl;
+  }
+
+  {
+    std::cout << "Measuring the time of execution on CPU..."
+              << std::endl;
+
+    auto startTime = std::chrono::steady_clock::now();
+
+    float sum = 0.0;
+    int length = m_values.size();
+    for (int i = 0; i < length; ++i)
+    {
+      int begin = std::max(0, i - 3);
+      int end = std::min(length - 1, i + 3);
+      float curr = 0.0;
+      for (int j = begin; j <= end; ++j)
+      {
+        curr += m_values[j];
+      }
+
+      curr /= 7.0;
+      sum += m_values[i] - curr;
+    }
+
+    auto endTime = std::chrono::steady_clock::now();
+    auto elapsedTime = endTime - startTime;
+
+    double elapsedTimeMillis = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(elapsedTime).count();
+
+    std::cout << "  Finished in " << elapsedTimeMillis << "ms\n"
+              << "  The result is " << sum << std::endl;
   }
 }
