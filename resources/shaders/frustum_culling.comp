@@ -1,0 +1,72 @@
+#version 430
+
+layout( local_size_x = 1 ) in;
+
+layout( push_constant ) uniform frustumCullingParams
+{
+  // vec4 planes[6];
+  mat4 mViewProjection;
+  vec4 boundingBoxBegin;
+  vec4 boundingBoxEnd;
+  uint length;
+};
+
+layout( std430, binding = 0 ) readonly buffer matrices
+{
+  mat4 matrixBuffer[];
+};
+
+layout( std430, binding = 1 ) buffer indices
+{
+  uint indexBuffer[];
+};
+
+layout( std430, binding = 2 ) buffer drawCommand
+{
+  uint indexCount;
+  uint instanceCount;
+  uint firstIndex;
+  int vertexOffset;
+  uint firstInstance;
+};
+
+bool checkObject(uint index)
+{
+  for (int i = 0; i < 6; ++i)
+  {
+    bool isInside = false;
+
+    for (int j = 0; j < 8; ++j)
+    {
+      vec3 point = mix(boundingBoxBegin.xyz, boundingBoxEnd.xyz, vec3(
+        (j & 1) > 0 ? 1.0 : 0.0,
+        (j & 2) > 0 ? 1.0 : 0.0,
+        (j & 4) > 0 ? 1.0 : 0.0
+      ));
+
+      vec4 pointClip = mViewProjection * matrixBuffer[index] * vec4(point, 1.0);
+      vec3 pointNDC = pointClip.xyz / pointClip.w;
+      
+      isInside = isInside || pointNDC == clamp(
+        pointNDC, vec3(-1.0), vec3(1.0)
+      );
+    }
+
+    if (!isInside)
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void main()
+{
+  uint index = gl_GlobalInvocationID.x;
+
+  if (index < length && checkObject(index)) {
+    uint targetIndex = atomicAdd(instanceCount, 1);
+    indexBuffer[targetIndex] = index;
+  }
+}
