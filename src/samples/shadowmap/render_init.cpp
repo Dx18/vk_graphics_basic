@@ -25,7 +25,7 @@ void SimpleShadowmapRender::InitVulkan(const char** a_instanceExtensions, uint32
       .deviceExtensions = m_deviceExtensions,
       .features = vk::PhysicalDeviceFeatures2
         {
-          .features = m_enabledDeviceFeatures
+          .features = m_enabledDeviceFeatures,
         },
       // Replace with an index if etna detects your preferred GPU incorrectly 
       .physicalDeviceIndexOverride = {}

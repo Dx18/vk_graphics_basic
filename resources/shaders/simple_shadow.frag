@@ -6,7 +6,7 @@
 
 layout(location = 0) out vec4 out_fragColor;
 
-layout (location = 0 ) in VS_OUT
+layout (location = 0 ) in GS_OUT
 {
   vec3 wPos;
   vec3 wNorm;
