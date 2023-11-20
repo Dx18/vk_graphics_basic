@@ -23,13 +23,13 @@ void main()
     {
         int begin = max(0, idx - 3);
         int end = min(int(PushConstant.len) - 1, idx + 3);
-	float curr = 0.0;
+        float curr = 0.0;
         for (int i = begin; i <= end; ++i)
         {
-	    curr += array[i];
+            curr += array[i];
         }
 
         curr /= 7.0;
-	result[idx] = array[idx] - curr;
+        result[idx] = array[idx] - curr;
     }
 }
