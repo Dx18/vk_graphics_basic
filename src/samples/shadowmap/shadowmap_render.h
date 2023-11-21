@@ -44,11 +44,33 @@ public:
   void DrawFrame(float a_time, DrawMode a_mode) override;
 
 private:
+  size_t m_lightCount;
+
   etna::GlobalContext* m_context;
-  etna::Image mainViewDepth;
-  etna::Image shadowMap;
-  etna::Sampler defaultSampler;
-  etna::Buffer constants;
+  etna::Image m_mainViewDepth;
+  etna::Image m_albedoDepthMap;
+  etna::Image m_normalMap;
+  etna::Sampler m_defaultSampler;
+  etna::Buffer m_constants;
+
+  etna::Buffer m_lightVolumeVertexBuffer;
+  etna::Buffer m_lightVolumeIndexBuffer;
+
+  etna::Buffer m_lightData;
+
+  struct
+  {
+    float4x4 view;
+    float4x4 projection;
+    float4x4 viewInv;
+    float4x4 projectionInv;
+    float4x4 viewProjection;
+    float4x4 viewProjectionInv;
+    float4 cameraPosition;
+    uint2 targetSize;
+  } m_viewParams;
+
+  etna::Buffer m_viewParamsBuffer;
 
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
@@ -65,7 +87,6 @@ private:
 
   struct
   {
-    float4x4 projView;
     float4x4 model;
   } pushConst2M;
 
@@ -75,8 +96,8 @@ private:
   UniformParams m_uniforms {};
   void* m_uboMappedMem = nullptr;
 
-  etna::GraphicsPipeline m_basicForwardPipeline {};
-  etna::GraphicsPipeline m_shadowPipeline {};
+  etna::GraphicsPipeline m_gBufferPassPipeline {};
+  etna::GraphicsPipeline m_deferredShadingPassPipeline {};
 
   std::shared_ptr<vk_utils::DescriptorMaker> m_pBindings = nullptr;
   
@@ -96,14 +117,9 @@ private:
   std::shared_ptr<SceneManager>     m_pScnMgr;
   std::shared_ptr<IRenderGUI> m_pGUIRender;
   
-  std::shared_ptr<vk_utils::IQuad>               m_pFSQuad;
-  VkDescriptorSet       m_quadDS; 
-  VkDescriptorSetLayout m_quadDSLayout = nullptr;
-
-  struct InputControlMouseEtc
-  {
-    bool drawFSQuad = false;
-  } m_input;
+  // std::shared_ptr<vk_utils::IQuad>               m_pFSQuad;
+  // VkDescriptorSet       m_quadDS; 
+  // VkDescriptorSetLayout m_quadDSLayout = nullptr;
 
   /**
   \brief basic parameters that you usually need for shadow mapping
@@ -135,7 +151,8 @@ private:
 
   void BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView);
 
-  void DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4x4& a_wvp);
+  void DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4x4 &a_wvp);
+  void DrawLightVolumesCmd(VkCommandBuffer a_cmdBuff);
 
   void loadShaders();
 
@@ -143,6 +160,7 @@ private:
   void RecreateSwapChain();
 
   void UpdateUniformBuffer(float a_time);
+  void UpdateViewParams();
 
 
   void SetupDeviceExtensions();

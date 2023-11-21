@@ -48,14 +48,33 @@ void SimpleShadowmapRender::UpdateUniformBuffer(float a_time)
   memcpy(m_uboMappedMem, &m_uniforms, sizeof(m_uniforms));
 }
 
+void SimpleShadowmapRender::UpdateViewParams()
+{
+  auto mView = LiteMath::lookAt(m_cam.pos, m_cam.lookAt, m_cam.up);
+
+  m_viewParams.view = mView;
+  m_viewParams.viewInv = LiteMath::inverse4x4(m_viewParams.view);
+
+  const float aspect = float(m_width) / float(m_height);
+
+  auto mProjFix = OpenglToVulkanProjectionMatrixFix();
+  auto mProj = projectionMatrix(m_cam.fov, aspect, 0.1f, 1000.0f);
+
+  m_viewParams.projection = mProjFix * mProj;
+  m_viewParams.projectionInv = LiteMath::inverse4x4(m_viewParams.projection);
+
+  m_viewParams.viewProjection = m_viewParams.projection * m_viewParams.view;
+  m_viewParams.viewProjectionInv = m_viewParams.viewInv * m_viewParams.projectionInv;
+
+  m_viewParams.cameraPosition = float4(m_cam.pos.x, m_cam.pos.y, m_cam.pos.z, 0.0);
+
+  m_viewParams.targetSize = uint2(m_width, m_height);
+
+  memcpy(m_viewParamsBuffer.data(), &m_viewParams, sizeof(m_viewParams));
+}
+
 void SimpleShadowmapRender::ProcessInput(const AppInput &input)
 {
-  // add keyboard controls here
-  // camera movement is processed separately
-  //
-  if(input.keyReleased[GLFW_KEY_Q])
-    m_input.drawFSQuad = !m_input.drawFSQuad;
-
   if(input.keyReleased[GLFW_KEY_P])
     m_light.usePerspectiveM = !m_light.usePerspectiveM;
 
@@ -63,9 +82,9 @@ void SimpleShadowmapRender::ProcessInput(const AppInput &input)
   if(input.keyPressed[GLFW_KEY_B])
   {
 #ifdef WIN32
-    std::system("cd ../resources/shaders && python compile_shadowmap_shaders.py");
+    std::system("cd ../resources/shaders && python compile_deferred_shading_shaders.py");
 #else
-    std::system("cd ../resources/shaders && python3 compile_shadowmap_shaders.py");
+    std::system("cd ../resources/shaders && python3 compile_deferred_shading_shaders.py");
 #endif
 
     etna::reload_shaders();

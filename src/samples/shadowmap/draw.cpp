@@ -66,6 +66,7 @@ void SimpleShadowmapRender::DrawFrameSimple(bool draw_gui)
 void SimpleShadowmapRender::DrawFrame(float a_time, DrawMode a_mode)
 {
   UpdateUniformBuffer(a_time);
+  UpdateViewParams();
   switch (a_mode)
   {
     case DrawMode::WITH_GUI:
