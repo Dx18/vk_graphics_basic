@@ -46,9 +46,14 @@ public:
 private:
   etna::GlobalContext* m_context;
   etna::Image mainViewDepth;
+  etna::Image mainViewColor;
+  etna::Image mainViewBlurredColor;
   etna::Image shadowMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
+  etna::Buffer blurCoeffs;
+
+  bool m_enableBlur = true;
 
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
@@ -77,6 +82,7 @@ private:
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
+  etna::ComputePipeline m_blurPipeline {};
 
   std::shared_ptr<vk_utils::DescriptorMaker> m_pBindings = nullptr;
   
@@ -95,15 +101,6 @@ private:
 
   std::shared_ptr<SceneManager>     m_pScnMgr;
   std::shared_ptr<IRenderGUI> m_pGUIRender;
-  
-  std::shared_ptr<vk_utils::IQuad>               m_pFSQuad;
-  VkDescriptorSet       m_quadDS; 
-  VkDescriptorSetLayout m_quadDSLayout = nullptr;
-
-  struct InputControlMouseEtc
-  {
-    bool drawFSQuad = false;
-  } m_input;
 
   /**
   \brief basic parameters that you usually need for shadow mapping

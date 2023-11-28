@@ -1,0 +1,72 @@
+#version 430
+
+#define WINDOW_SIZE 11
+#define WINDOW_HALF_SIZE 5
+
+layout (local_size_x = WINDOW_SIZE, local_size_y = WINDOW_SIZE) in;
+
+layout (push_constant) uniform blurParams_t
+{
+    float variance;
+} blurParams;
+
+layout (rgba32f, binding = 0) uniform image2D imageInput;
+
+layout (rgba32f, binding = 1) uniform image2D imageOutput;
+
+layout (std140, binding = 2) uniform blurCoeffs_t
+{
+    float coeffs[WINDOW_SIZE];
+} blurCoeffs;
+
+shared vec4 groupData[WINDOW_SIZE][WINDOW_SIZE];
+
+const float pi = 3.14159265359;
+
+void main() 
+{
+    ivec2 targetPixelCoords = ivec2(gl_WorkGroupID.xy);
+    ivec2 localCoords = ivec2(gl_LocalInvocationID.xy);
+
+    // Loading pixel data
+    {
+        ivec2 offset = localCoords - WINDOW_HALF_SIZE;
+        
+        ivec2 currPixelCoords = clamp(
+            ivec2(targetPixelCoords) + offset,
+            ivec2(0), imageSize(imageInput) - 1);
+        
+        groupData[localCoords.x][localCoords.y] =
+            imageLoad(imageInput, currPixelCoords);
+    }
+
+    barrier();
+
+    // Horizontal pass
+    if (localCoords.x == 0)
+    {
+        vec4 currData = vec4(0.0);
+
+        for (int x = 0; x < gl_WorkGroupSize.x; ++x)
+        {
+            currData += groupData[x][localCoords.y] * blurCoeffs.coeffs[x];
+        }
+
+        groupData[0][localCoords.y] = currData;
+    }
+    
+    barrier();
+
+    // Vertical pass
+    if (localCoords.x == 0 && localCoords.y == 0)
+    {
+        vec4 currData = vec4(0.0);
+
+        for (int y = 0; y < gl_WorkGroupSize.y; ++y)
+        {
+            currData += groupData[0][y] * blurCoeffs.coeffs[y];
+        }
+
+        imageStore(imageOutput, targetPixelCoords, currData / 2.0 / pi * blurParams.variance);
+    }
+}

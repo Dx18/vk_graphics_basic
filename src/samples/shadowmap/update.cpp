@@ -50,11 +50,8 @@ void SimpleShadowmapRender::UpdateUniformBuffer(float a_time)
 
 void SimpleShadowmapRender::ProcessInput(const AppInput &input)
 {
-  // add keyboard controls here
-  // camera movement is processed separately
-  //
   if(input.keyReleased[GLFW_KEY_Q])
-    m_input.drawFSQuad = !m_input.drawFSQuad;
+    m_enableBlur = !m_enableBlur;
 
   if(input.keyReleased[GLFW_KEY_P])
     m_light.usePerspectiveM = !m_light.usePerspectiveM;
