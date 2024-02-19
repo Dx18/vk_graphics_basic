@@ -116,15 +116,15 @@ private:
       cam.lookAt = float3(0, 0, 0);
       cam.up     = float3(0, 1, 0);
   
-      radius          = 5.0f;
+      cutoffBegin = cam.fov * 0.4f;
+      cutoffEnd = cam.fov * 0.5f;
       lightTargetDist = 20.0f;
-      usePerspectiveM = true;
     }
 
-    float  radius;           ///!< ignored when usePerspectiveM == true 
+    float cutoffBegin;
+    float cutoffEnd;
     float  lightTargetDist;  ///!< identify depth range
     Camera cam;              ///!< user control for light to later get light worldViewProj matrix
-    bool   usePerspectiveM;  ///!< use perspective matrix if true and ortographics otherwise
   
   } m_light;
  
