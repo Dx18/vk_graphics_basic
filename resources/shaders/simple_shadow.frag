@@ -27,8 +27,15 @@ void main()
   const vec3 posLightSpaceNDC  = posLightClipSpace.xyz/posLightClipSpace.w;    // for orto matrix, we don't need perspective division, you can remove it if you want; this is general case;
   const vec2 shadowTexCoord    = posLightSpaceNDC.xy*0.5f + vec2(0.5f, 0.5f);  // just shift coords from [-1,1] to [0,1]               
     
+  const float distance = length(shadowTexCoord - vec2(0.5f));
+
   const bool  outOfView = (shadowTexCoord.x < 0.0001f || shadowTexCoord.x > 0.9999f || shadowTexCoord.y < 0.0091f || shadowTexCoord.y > 0.9999f);
-  const float shadow    = ((posLightSpaceNDC.z < textureLod(shadowMap, shadowTexCoord, 0).x + 0.001f) || outOfView) ? 1.0f : 0.0f;
+  const float shadowSample = ((posLightSpaceNDC.z < textureLod(shadowMap, shadowTexCoord, 0).x + 0.001f) && !outOfView) ? 1.0f : 0.0f;
+
+  const float cutoffDiff = Params.cutoffEnd - Params.cutoffBegin;
+  const float cutoff = clamp(-distance / cutoffDiff + Params.cutoffEnd / cutoffDiff, 0.0f, 1.0f);
+
+  const float shadow = shadowSample * cutoff;
 
   const vec4 dark_violet = vec4(0.59f, 0.0f, 0.82f, 1.0f);
   const vec4 chartreuse  = vec4(0.5f, 1.0f, 0.0f, 1.0f);

@@ -12,7 +12,10 @@ void SimpleShadowmapRender::SetupGUIElements()
     ImGui::Begin("Simple render settings");
 
     ImGui::ColorEdit3("Meshes base color", m_uniforms.baseColor.M, ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoInputs);
-    ImGui::SliderFloat3("Light source position", m_uniforms.lightPos.M, -10.f, 10.f);
+    ImGui::SliderFloat3("Light source position", m_light.cam.pos.M, -10.f, 10.f);
+
+    ImGui::SliderFloat("Cutoff begin", &m_light.cutoffBegin, 0.0f, m_light.cutoffEnd);
+    ImGui::SliderFloat("Cutoff end", &m_light.cutoffEnd, m_light.cutoffBegin, m_light.cam.fov / 2.0);
 
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
