@@ -47,6 +47,7 @@ private:
   etna::GlobalContext* m_context;
   etna::Image mainViewDepth;
   etna::Image shadowMap;
+  etna::Image varianceShadowMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
 
@@ -75,8 +76,12 @@ private:
   UniformParams m_uniforms {};
   void* m_uboMappedMem = nullptr;
 
-  etna::GraphicsPipeline m_basicForwardPipeline {};
+  etna::GraphicsPipeline m_simpleShadedMaterialPipeline {};
+  etna::GraphicsPipeline m_varianceShadedMaterialPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
+  etna::GraphicsPipeline m_varianceShadowPipeline {};
+
+  bool m_useSimpleShadow = true;
 
   std::shared_ptr<vk_utils::DescriptorMaker> m_pBindings = nullptr;
   
@@ -118,7 +123,7 @@ private:
   
       radius          = 5.0f;
       lightTargetDist = 20.0f;
-      usePerspectiveM = true;
+      usePerspectiveM = false;
     }
 
     float  radius;           ///!< ignored when usePerspectiveM == true 
