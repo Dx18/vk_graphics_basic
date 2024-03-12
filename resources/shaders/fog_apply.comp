@@ -1,0 +1,24 @@
+#version 450
+
+layout(binding = 0, set = 0, rgba32f) uniform image2D viewColorImage;
+layout(binding = 1, set = 0) uniform sampler2D fogMap;
+
+void main()
+{
+  uvec2 pixelLocation = gl_GlobalInvocationID.xy;
+  uvec2 viewColorImageSize = imageSize(viewColorImage);
+
+  if (pixelLocation.x >= viewColorImageSize.x || pixelLocation.y >= viewColorImageSize.y)
+  {
+    return;
+  }
+
+  vec2 uv = (vec2(pixelLocation) + 0.5) / vec2(viewColorImageSize);
+
+  vec3 viewColor = imageLoad(viewColorImage, ivec2(pixelLocation)).rgb;
+  float fogValue = texture(fogMap, uv).r;
+
+  vec3 finalColor = mix(viewColor, vec3(0.3f), fogValue);
+
+  imageStore(viewColorImage, ivec2(pixelLocation), vec4(finalColor, 1.0f));
+}

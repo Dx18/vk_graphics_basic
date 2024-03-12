@@ -45,8 +45,10 @@ public:
 
 private:
   etna::GlobalContext* m_context;
+  etna::Image mainViewColor;
   etna::Image mainViewDepth;
   etna::Image shadowMap;
+  etna::Image fogMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
 
@@ -77,6 +79,8 @@ private:
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
+  etna::ComputePipeline m_fogGeneratePipeline {};
+  etna::ComputePipeline m_fogApplyPipeline {};
 
   std::shared_ptr<vk_utils::DescriptorMaker> m_pBindings = nullptr;
   

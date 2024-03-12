@@ -1,0 +1,87 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "common.h"
+
+layout(binding = 0, set = 0) uniform AppData
+{
+  UniformParams Params;
+};
+
+layout(binding = 1, set = 0) writeonly uniform image2D fogMap;
+layout(binding = 2, set = 0) uniform sampler2D depthMap;
+
+layout(push_constant) uniform params_t
+{
+    mat4 mProjViewInv;
+} params;
+
+const int MAX_ITERATIONS = 256;
+
+float smin(float a, float b, float k)
+{
+  k *= 2.0;
+  float x = b - a;
+  return 0.5 * (a + b - sqrt(x * x + k * k));
+}
+
+float calculateSphereDistance(vec3 center, float radius, vec3 worldPos)
+{
+  return length(worldPos - center) - radius;
+}
+
+float calculateDistance(vec3 worldPos)
+{
+  float result = calculateSphereDistance(vec3(-0.3f, 0.3f, 0.1f), 0.4f, worldPos);
+  result = smin(result, calculateSphereDistance(
+    vec3(0.5f + sin(Params.time * 1.0f), -0.3f, -0.1f), 0.2f, worldPos
+  ), 0.5f);
+  result = smin(result, calculateSphereDistance(
+    vec3(-0.9f, -0.6f, 0.4f + cos(Params.time * 1.5f) * cos(Params.time * 0.3f)), 0.4f, worldPos
+  ), 0.5f);
+  return result;
+}
+
+void main()
+{
+  uvec2 pixelLocation = gl_GlobalInvocationID.xy;
+  uvec2 fogMapSize = imageSize(fogMap);
+
+  if (pixelLocation.x >= fogMapSize.x || pixelLocation.y >= fogMapSize.y)
+  {
+    return;
+  }
+
+  vec2 uv = (vec2(pixelLocation) + 0.5) / vec2(fogMapSize);
+  vec2 xy = uv * 2.0f - 1.0f;
+
+  vec4 worldPosBeginH = params.mProjViewInv * vec4(xy, 0.0f, 1.0f);
+  vec3 worldPosBegin = worldPosBeginH.xyz / worldPosBeginH.w;
+  vec4 worldPosEndH = params.mProjViewInv * vec4(xy, 1.0f, 1.0f);
+  vec3 worldPosEnd = worldPosEndH.xyz / worldPosEndH.w;
+  vec3 direction = normalize(worldPosEnd - worldPosBegin);
+
+  vec4 fragPosH = params.mProjViewInv * vec4(xy, texture(depthMap, uv).r, 1.0f);
+  float fragDistance = length(fragPosH.xyz / fragPosH.w - worldPosBegin);
+
+  vec3 currPos = worldPosBegin;
+  float insideFog = 0.0f;
+  for (int i = 0; i < MAX_ITERATIONS && length(currPos - worldPosBegin) < fragDistance; ++i)
+  {
+    float distance = calculateDistance(currPos);
+
+    if (distance <= 0.0)
+    {
+      insideFog += 0.05f;
+    }
+
+    currPos += direction * 0.05f;
+  }
+
+  // vec4 finalPosH = inverse(params.mProjViewInv) * vec4(currPos, 1.0f);
+  // float depth = finalPosH.z / finalPosH.w;
+
+  imageStore(fogMap, ivec2(pixelLocation), vec4(1.0f - exp(-insideFog * 0.5f), 0.0f, 0.0f, 1.0f));
+  // imageStore(fogMap, ivec2(pixelLocation), vec4(insideFog, 0.0f, 0.0f, 1.0f));
+  // imageStore(fogMap, ivec2(pixelLocation), vec4(fragPosH.z / fragPosH.w, 0.0f, 0.0f, 1.0f));
+}
