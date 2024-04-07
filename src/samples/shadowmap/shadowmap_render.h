@@ -48,6 +48,7 @@ private:
   etna::Image mainViewDepth;
   etna::Image shadowMap;
   etna::Image varianceShadowMap;
+  etna::Image varianceShadowMapBlurred;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
 
@@ -80,6 +81,7 @@ private:
   etna::GraphicsPipeline m_varianceShadedMaterialPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
   etna::GraphicsPipeline m_varianceShadowPipeline {};
+  etna::ComputePipeline m_blurPipeline {};
 
   bool m_useSimpleShadow = true;
 

@@ -35,8 +35,15 @@ void SimpleShadowmapRender::AllocateResources()
   {
     .extent = vk::Extent3D{2048, 2048, 1},
     .name = "variance_shadow_map",
-    .format = vk::Format::eR16G16Unorm,
-    .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled
+    .format = vk::Format::eR32G32Sfloat,
+    .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
+  });
+  varianceShadowMapBlurred = m_context->createImage(etna::Image::CreateInfo
+  {
+    .extent = vk::Extent3D{2048, 2048, 1},
+    .name = "variance_shadow_map_blurred",
+    .format = vk::Format::eR32G32Sfloat,
+    .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
   });
 
   defaultSampler = etna::Sampler(etna::Sampler::CreateInfo{.filter = vk::Filter::eLinear, .name = "default_sampler"});
@@ -104,6 +111,7 @@ void SimpleShadowmapRender::loadShaders()
   etna::create_program("simple_shadow", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
   etna::create_program("variance_shadow",
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/variance_shadow_map.frag.spv"});
+  etna::create_program("blur", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/blur.comp.spv"});
 }
 
 void SimpleShadowmapRender::SetupSimplePipeline()
@@ -148,15 +156,12 @@ void SimpleShadowmapRender::SetupSimplePipeline()
       .vertexShaderInput = sceneVertexInputDesc,
       .fragmentShaderOutput =
         {
-          .colorAttachmentFormats = {vk::Format::eR16G16Unorm},
+          .colorAttachmentFormats = {vk::Format::eR32G32Sfloat},
           .depthAttachmentFormat = vk::Format::eD16Unorm
         }
     });
-}
 
-void SimpleShadowmapRender::DestroyPipelines()
-{
-  m_pFSQuad     = nullptr; // smartptr delete it's resources
+  m_blurPipeline = pipelineManager.createComputePipeline("blur", {});
 }
 
 
@@ -201,7 +206,7 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     //// draw scene to shadowmap
     //
     {
-      etna::RenderTargetState renderTargets(a_cmdBuff, {2048, 2048}, {}, shadowMap);
+      etna::RenderTargetState renderTargets(a_cmdBuff, vk::Rect2D{{0, 0}, {2048, 2048}}, {}, {shadowMap.get(), shadowMap.getView({})});
 
       vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline.getVkPipeline());
       DrawSceneCmd(a_cmdBuff, m_lightMatrix);
@@ -220,7 +225,8 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
       VkDescriptorSet vkSet = set.getVkSet();
 
-      etna::RenderTargetState renderTargets(a_cmdBuff, {m_width, m_height}, {{a_targetImage, a_targetImageView}}, mainViewDepth);
+      etna::RenderTargetState renderTargets(a_cmdBuff, vk::Rect2D{{0, 0}, {m_width, m_height}}, {{a_targetImage, a_targetImageView}},
+          {mainViewDepth.get(), mainViewDepth.getView({})});
 
       vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_simpleShadedMaterialPipeline.getVkPipeline());
       vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -234,11 +240,36 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     //// draw scene to shadowmap
     //
     {
-      etna::RenderTargetState renderTargets(a_cmdBuff, {2048, 2048},
-          {{varianceShadowMap.get(), varianceShadowMap.getView({})}}, shadowMap);
+      etna::RenderTargetState renderTargets(a_cmdBuff, vk::Rect2D{{0, 0}, {2048, 2048}},
+          {{varianceShadowMap.get(), varianceShadowMap.getView({})}},
+          {shadowMap.get(), shadowMap.getView({})});
 
       vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_varianceShadowPipeline.getVkPipeline());
       DrawSceneCmd(a_cmdBuff, m_lightMatrix);
+    }
+
+    {
+      etna::set_state(a_cmdBuff, varianceShadowMap.get(), vk::PipelineStageFlagBits2::eComputeShader,
+          vk::AccessFlagBits2::eShaderRead, vk::ImageLayout::eGeneral, vk::ImageAspectFlagBits::eColor);
+      etna::set_state(a_cmdBuff, varianceShadowMapBlurred.get(), vk::PipelineStageFlagBits2::eComputeShader,
+          vk::AccessFlagBits2::eShaderWrite, vk::ImageLayout::eGeneral, vk::ImageAspectFlagBits::eColor);
+      etna::flush_barriers(a_cmdBuff);
+
+      auto blurInfo = etna::get_shader_program("blur");
+
+      auto set = etna::create_descriptor_set(blurInfo.getDescriptorLayoutId(0), a_cmdBuff,
+      {
+        etna::Binding {0, varianceShadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)},
+        etna::Binding {1, varianceShadowMapBlurred.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)},
+      });
+
+      VkDescriptorSet vkSet = set.getVkSet();
+
+      vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_blurPipeline.getVkPipeline());
+      vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE,
+          m_blurPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
+
+      vkCmdDispatch(a_cmdBuff, 2048, 2048, 1);
     }
 
     //// draw final scene to screen
@@ -249,12 +280,13 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
       auto set = etna::create_descriptor_set(varianceShadedMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
       {
         etna::Binding {0, constants.genBinding()},
-        etna::Binding {1, varianceShadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
+        etna::Binding {1, varianceShadowMapBlurred.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
       });
 
       VkDescriptorSet vkSet = set.getVkSet();
 
-      etna::RenderTargetState renderTargets(a_cmdBuff, {m_width, m_height}, {{a_targetImage, a_targetImageView}}, mainViewDepth);
+      etna::RenderTargetState renderTargets(a_cmdBuff, vk::Rect2D{{0, 0}, {m_width, m_height}}, {{a_targetImage, a_targetImageView}},
+          {mainViewDepth.get(), mainViewDepth.getView({})});
 
       vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_varianceShadedMaterialPipeline.getVkPipeline());
       vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -265,7 +297,7 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
   }
 
   if(m_input.drawFSQuad)
-    m_pQuad->RecordCommands(a_cmdBuff, a_targetImage, a_targetImageView, shadowMap, defaultSampler);
+    m_pQuad->RecordCommands(a_cmdBuff, a_targetImage, a_targetImageView, varianceShadowMapBlurred, defaultSampler);
 
   etna::set_state(a_cmdBuff, a_targetImage, vk::PipelineStageFlagBits2::eBottomOfPipe,
     vk::AccessFlags2(), vk::ImageLayout::ePresentSrcKHR,
