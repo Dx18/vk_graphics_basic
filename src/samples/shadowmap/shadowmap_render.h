@@ -44,7 +44,8 @@ public:
   void DrawFrame(float a_time, DrawMode a_mode) override;
 
 private:
-  etna::GlobalContext* m_context;
+  etna::GlobalContext *m_context;
+  etna::Image mainView;
   etna::Image mainViewDepth;
   etna::Image shadowMap;
   etna::Sampler defaultSampler;
@@ -86,6 +87,8 @@ private:
   uint32_t m_height = 1024u;
   uint32_t m_framesInFlight = 2u;
   bool m_vsync = false;
+
+  bool use_ssaa{false};
 
   vk::PhysicalDeviceFeatures m_enabledDeviceFeatures = {};
   std::vector<const char*> m_deviceExtensions;
