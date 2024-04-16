@@ -14,6 +14,20 @@ void SimpleShadowmapRender::SetupGUIElements()
     ImGui::ColorEdit3("Meshes base color", m_uniforms.baseColor.M, ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoInputs);
     ImGui::SliderFloat3("Light source position", m_uniforms.lightPos.M, -10.f, 10.f);
 
+    ImGui::InputFloat3("Terrain box begin", terrainBoxBegin.M);
+    ImGui::SameLine();
+    if (ImGui::Button("(Sync with camera)##SyncBegin"))
+    {
+      terrainBoxBegin = m_cam.pos;
+    }
+
+    ImGui::InputFloat3("Terrain box end", terrainBoxEnd.M);
+    ImGui::SameLine();
+    if (ImGui::Button("(Sync with camera)##SyncEnd"))
+    {
+      terrainBoxEnd = m_cam.pos;
+    }
+
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
     ImGui::NewLine();

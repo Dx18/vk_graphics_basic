@@ -1,0 +1,99 @@
+#version 450
+
+const float PI = 3.14159265359;
+
+layout (binding = 0) uniform RawNoise
+{
+    vec4 data[256];
+} rawNoise;
+
+layout (binding = 1) writeonly uniform image2D resultNoise;
+
+vec2 skew(vec2 position)
+{
+    const float F = (sqrt(3.0) - 1) / 2.0;
+    return position + dot(position, vec2(1.0)) * F;
+}
+
+vec2 unskew(vec2 position)
+{
+    const float G = (1.0 - 1.0 / sqrt(3.0)) / 2.0;
+    return position - dot(position, vec2(1.0)) * G;
+}
+
+vec2 getGradient(vec2 position)
+{
+    int x = int(position.x);
+    int y = int(position.y);
+
+    int index = (((x * 631 + y * 5) % 1024) + 1024) % 1024;
+
+    float angle = rawNoise.data[index / 4][index % 4] * 2.0 * PI;
+
+    return vec2(cos(angle), sin(angle));
+}
+
+float noise(vec2 position)
+{
+    vec2 positionSkewed = skew(position);
+
+    vec2 simplexOrigin = floor(positionSkewed);
+    vec2 positionInSimplex = positionSkewed - simplexOrigin;
+
+    vec2 position0 = unskew(simplexOrigin);
+
+    vec2 position1;
+    if (positionInSimplex.x >= positionInSimplex.y)
+    {
+        position1 = unskew(simplexOrigin + vec2(1.0, 0.0));
+    }
+    else
+    {
+        position1 = unskew(simplexOrigin + vec2(0.0, 1.0));
+    }
+
+    vec2 position2 = unskew(simplexOrigin + vec2(1.0));
+
+    float result = 0.0;
+
+    vec2 gradient0 = getGradient(position0);
+    vec2 delta0 = position - position0;
+    result += pow(max(0.0, 0.6 - dot(delta0, delta0)), 4.0) * dot(delta0, gradient0);
+
+    vec2 gradient1 = getGradient(position1);
+    vec2 delta1 = position - position1;
+    result += pow(max(0.0, 0.6 - dot(delta1, delta1)), 4.0) * dot(delta1, gradient1);
+
+    vec2 gradient2 = getGradient(position2);
+    vec2 delta2 = position - position2;
+    result += pow(max(0.0, 0.6 - dot(delta2, delta2)), 4.0) * dot(delta2, gradient2);
+
+    result *= 15.0;
+    result += 0.5;
+
+    return result;
+}
+
+float interpolate(float x)
+{
+    return (sin((x - 0.5) * PI) + 1.0) / 2.0;
+}
+
+void main()
+{
+    ivec2 pixelLocation = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 resultNoiseSize = imageSize(resultNoise);
+
+    if (pixelLocation.x >= resultNoiseSize.x || pixelLocation.y >= resultNoiseSize.y)
+    {
+        return;
+    }
+
+    vec2 position = (vec2(pixelLocation) + 0.5) / vec2(resultNoiseSize) - 0.5;
+
+    float baseHeight = interpolate(interpolate(interpolate(noise(position * 1.5))));
+
+    float height = baseHeight * (pow(noise(position * 4.0) * 0.8, 2.0) + noise(position * 8.0) * 0.15 + noise(position * 20.0) * 0.05);
+
+    imageStore(resultNoise, pixelLocation, vec4(height, 0.0, 0.0, 1.0));
+}

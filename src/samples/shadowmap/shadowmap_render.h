@@ -50,6 +50,11 @@ private:
   etna::Sampler defaultSampler;
   etna::Buffer constants;
 
+  etna::Buffer rawNoiseBuffer;
+  etna::Image noiseImage;
+
+  bool isNoiseImageFilled = false;
+
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
   struct
@@ -69,6 +74,9 @@ private:
     float4x4 model;
   } pushConst2M;
 
+  float3 terrainBoxBegin {-3.0, -1.0, -3.0};
+  float3 terrainBoxEnd {3.0, 0.0, 3.0};
+
   float4x4 m_worldViewProj;
   float4x4 m_lightMatrix;    
 
@@ -77,6 +85,9 @@ private:
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
+  etna::GraphicsPipeline m_terrainMaterialPipeline {};
+  etna::GraphicsPipeline m_terrainShadowPipeline {};
+  etna::ComputePipeline m_noisePipeline {};
   
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
@@ -87,7 +98,10 @@ private:
   uint32_t m_framesInFlight = 2u;
   bool m_vsync = false;
 
-  vk::PhysicalDeviceFeatures m_enabledDeviceFeatures = {};
+  vk::PhysicalDeviceFeatures m_enabledDeviceFeatures =
+  {
+    .tessellationShader = true
+  };
   std::vector<const char*> m_deviceExtensions;
   std::vector<const char*> m_instanceExtensions;
 
@@ -129,6 +143,7 @@ private:
   void BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView);
 
   void DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4x4& a_wvp, VkPipelineLayout a_pipelineLayout = VK_NULL_HANDLE);
+  void DrawTerrainCmd(VkCommandBuffer a_cmdBuff, const float4x4 &a_wvp, VkPipelineLayout a_pipelineLayout = VK_NULL_HANDLE);
 
   void loadShaders();
 
