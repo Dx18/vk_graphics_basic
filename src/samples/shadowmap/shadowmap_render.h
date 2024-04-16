@@ -45,10 +45,14 @@ public:
 
 private:
   etna::GlobalContext* m_context;
+  etna::Image mainView;
   etna::Image mainViewDepth;
+  etna::Image ssaoOverlay;
+  etna::Image ssaoResult;
   etna::Image shadowMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
+  etna::Buffer ssaoNoise;
 
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
@@ -77,6 +81,8 @@ private:
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
+  etna::ComputePipeline m_ssaoOverlayPipeline {};
+  etna::ComputePipeline m_ssaoApplyPipeline {};
   
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
@@ -86,6 +92,8 @@ private:
   uint32_t m_height = 1024u;
   uint32_t m_framesInFlight = 2u;
   bool m_vsync = false;
+
+  bool m_enableSSAO = true;
 
   vk::PhysicalDeviceFeatures m_enabledDeviceFeatures = {};
   std::vector<const char*> m_deviceExtensions;

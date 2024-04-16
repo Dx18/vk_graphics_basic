@@ -1,0 +1,98 @@
+#version 450
+
+#define FILTER_SIZE 15
+
+const float VARIANCE = 64.0;
+const float PI = 3.14159265359;
+
+layout (local_size_x = FILTER_SIZE, local_size_y = FILTER_SIZE, local_size_z = 1) in;
+
+layout (push_constant) uniform params_t
+{
+    mat4 mProjView;
+    mat4 mModel;
+} params;
+
+layout (binding = 0, set = 0) uniform sampler2D mainView;
+layout (binding = 1, set = 0) uniform sampler2D mainViewDepth;
+layout (binding = 2, set = 0) uniform sampler2D ssaoOverlay;
+layout (binding = 3, set = 0) writeonly uniform image2D ssaoResult;
+
+shared float depthDeltas[FILTER_SIZE][FILTER_SIZE];
+shared float results[FILTER_SIZE][FILTER_SIZE];
+
+float getDistance(ivec2 pixelLocation, ivec2 size)
+{
+    vec2 uv = (vec2(pixelLocation) + 0.5) / vec2(size);
+    vec2 xy = uv * 2.0f - 1.0f;
+
+    vec4 positionH = inverse(params.mProjView) * vec4(xy, texelFetch(mainViewDepth, pixelLocation, 0).r, 1.0);
+    vec3 position = positionH.xyz / positionH.w;
+
+    vec4 cameraPositionH = inverse(params.mProjView) * vec4(0.0, 0.0, 0.0, 1.0);
+    vec3 cameraPosition = cameraPositionH.xyz / cameraPositionH.w;
+
+    return length(position - cameraPosition);
+}
+
+void main()
+{
+    ivec2 basePixelLocation = ivec2(gl_WorkGroupID.xy);
+    ivec2 resultSize = ivec2(imageSize(ssaoResult));
+
+    if (basePixelLocation.x >= resultSize.x || basePixelLocation.y >= resultSize.y)
+    {
+        return;
+    }
+
+    ivec2 offset = ivec2(gl_LocalInvocationID.xy) - ivec2(FILTER_SIZE) / 2;
+
+    ivec2 pixelLocation = clamp(basePixelLocation + offset, ivec2(0), resultSize);
+
+    float baseDepth = getDistance(basePixelLocation, resultSize);
+
+    depthDeltas[offset.y + FILTER_SIZE / 2][offset.x + FILTER_SIZE / 2] = max(0.0, 0.1 - abs(getDistance(pixelLocation, resultSize) - baseDepth)) * 10.0;
+    results[offset.y + FILTER_SIZE / 2][offset.x + FILTER_SIZE / 2] = texelFetch(ssaoOverlay, pixelLocation, 0).r;
+
+    barrier();
+
+    if (offset.x == 0)
+    {
+        float rowDepthDeltaSum = 0.0;
+        float rowResult = 0.0;
+
+        for (int j = 0; j < FILTER_SIZE; ++j)
+        {
+            float currDepthDelta = depthDeltas[offset.y + FILTER_SIZE / 2][j];
+            float currResult = results[offset.y + FILTER_SIZE / 2][j];
+
+            rowDepthDeltaSum += currDepthDelta;
+            rowResult += currResult * currDepthDelta * exp(-(j - FILTER_SIZE / 2) * (j - FILTER_SIZE / 2) / 2.0 / VARIANCE);
+        }
+
+        depthDeltas[offset.y + FILTER_SIZE / 2][FILTER_SIZE / 2] = rowDepthDeltaSum;
+        results[offset.y + FILTER_SIZE / 2][FILTER_SIZE / 2] = rowResult;
+    }
+
+    barrier();
+
+    if (offset == ivec2(0))
+    {
+        float depthDeltaSum = 0.0;
+        float result = 0.0;
+
+        for (int i = 0; i < FILTER_SIZE; ++i)
+        {
+            depthDeltaSum += depthDeltas[i][FILTER_SIZE / 2];
+            result += results[i][FILTER_SIZE / 2] * exp(-(i - FILTER_SIZE / 2) * (i - FILTER_SIZE / 2) / 2.0 / VARIANCE);
+        }
+        
+        result /= 2.0 * PI * VARIANCE;
+        result *= FILTER_SIZE * FILTER_SIZE / depthDeltaSum;
+
+        vec3 color = texelFetch(mainView, pixelLocation, 0).rgb;
+
+        imageStore(ssaoResult, pixelLocation, vec4(result * color, 1.0));
+        // imageStore(ssaoResult, pixelLocation, vec4(depthDeltaSum / FILTER_SIZE / FILTER_SIZE, 0.0, 0.0, 1.0));
+    }
+}

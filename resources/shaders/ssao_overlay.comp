@@ -1,0 +1,69 @@
+#version 450
+
+layout (push_constant) uniform params_t
+{
+    mat4 mProjView;
+    mat4 mModel;
+} params;
+
+layout (binding = 0, set = 0) uniform sampler2D mainViewDepth;
+layout (binding = 1, set = 0) writeonly uniform image2D ssaoOverlay;
+
+layout (binding = 2, set = 0) uniform Noise
+{
+    vec4 samples[64]; // Offset + weight
+    vec4 rotations[64];
+} noise;
+
+bool isVisible(vec3 position)
+{
+    vec4 screenPositionH = params.mProjView * vec4(position, 1.0);
+    vec3 screenPosition = screenPositionH.xyz / screenPositionH.w;
+
+    float sampledDepth = screenPosition.z;
+    float actualDepth = texture(mainViewDepth, (screenPosition.xy + 1.0) / 2.0).r;
+
+    return sampledDepth > actualDepth;
+}
+
+float sampleAround(vec3 position, float rotation)
+{
+    float result = 0.0;
+
+    for (int i = 0; i < 64; ++i)
+    {
+        vec3 offset = noise.samples[i].xyz;
+        offset = vec3(offset.x * cos(rotation) + offset.y * sin(rotation),
+            offset.y * cos(rotation) - offset.x * sin(rotation), offset.z);
+
+        result += float(!isVisible(position + offset)) * noise.samples[i].w;
+    }
+
+    result /= 64.0;
+
+    return result;
+}
+
+void main()
+{
+    ivec2 pixelLocation = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 resultSize = ivec2(imageSize(ssaoOverlay));
+
+    if (pixelLocation.x >= resultSize.x || pixelLocation.y >= resultSize.y)
+    {
+        return;
+    }
+
+    vec2 uv = (vec2(pixelLocation) + 0.5) / vec2(resultSize);
+    vec2 xy = uv * 2.0f - 1.0f;
+
+    vec4 positionH = inverse(params.mProjView) * vec4(xy, texture(mainViewDepth, uv).r, 1.0f);
+    vec3 position = positionH.xyz / positionH.w;
+
+    int rotationIndex = pixelLocation.x % 16 + pixelLocation.y % 16 * 16;
+    float rotation = noise.rotations[rotationIndex / 4][rotationIndex % 4];
+
+    float tint = sampleAround(position, rotation);
+
+    imageStore(ssaoOverlay, pixelLocation, vec4(tint, 0.0, 0.0, 1.0));
+}

@@ -4,6 +4,7 @@
 #include <vk_pipeline.h>
 #include <vk_buffers.h>
 #include <iostream>
+#include <random>
 
 #include <etna/GlobalContext.hpp>
 #include <etna/Etna.hpp>
@@ -15,12 +16,33 @@
 
 void SimpleShadowmapRender::AllocateResources()
 {
+  mainView = m_context->createImage(etna::Image::CreateInfo
+  {
+    .extent = vk::Extent3D{m_width, m_height, 1},
+    .name = "main_view",
+    .format = vk::Format::eR32G32B32A32Sfloat,
+    .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc
+  });
   mainViewDepth = m_context->createImage(etna::Image::CreateInfo
   {
     .extent = vk::Extent3D{m_width, m_height, 1},
     .name = "main_view_depth",
     .format = vk::Format::eD32Sfloat,
-    .imageUsage = vk::ImageUsageFlagBits::eDepthStencilAttachment
+    .imageUsage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled
+  });
+  ssaoOverlay = m_context->createImage(etna::Image::CreateInfo
+  {
+    .extent = vk::Extent3D{m_width, m_height, 1},
+    .name = "ssao_overlay",
+    .format = vk::Format::eR32Sfloat,
+    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
+  });
+  ssaoResult = m_context->createImage(etna::Image::CreateInfo
+  {
+    .extent = vk::Extent3D{m_width, m_height, 1},
+    .name = "ssao_result",
+    .format = vk::Format::eR32G32B32A32Sfloat,
+    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc
   });
 
   shadowMap = m_context->createImage(etna::Image::CreateInfo
@@ -41,6 +63,49 @@ void SimpleShadowmapRender::AllocateResources()
   });
 
   m_uboMappedMem = constants.map();
+
+  ssaoNoise = m_context->createBuffer(etna::Buffer::CreateInfo
+  {
+    .size = sizeof(float4) * 128,
+    .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer,
+    .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
+    .name = "ssao_noise"
+  });
+
+  float *ssaoNoiseData = reinterpret_cast<float *>(ssaoNoise.map());
+
+  std::mt19937 random;
+  std::normal_distribution<float> genOffsetComponent(0.0, 1.0);
+  std::uniform_real_distribution<float> genSampleDistance(0.0, 1.0);
+  
+  for (size_t i = 0; i < 64; ++i)
+  {
+    float3 offset;
+    for (size_t j = 0; j < 3; ++j)
+    {
+      offset[j] = genOffsetComponent(random);
+    }
+    offset = LiteMath::normalize(offset);
+
+    float distance = genSampleDistance(random);
+    distance *= distance;
+
+    offset *= distance;
+
+    ssaoNoiseData[4 * i]     = offset.x;
+    ssaoNoiseData[4 * i + 1] = offset.y;
+    ssaoNoiseData[4 * i + 2] = offset.z;
+    ssaoNoiseData[4 * i + 3] = 1.0 - distance;
+  }
+
+  std::uniform_real_distribution<float> genRotation(0.0, 1.0);
+
+  for (size_t i = 0; i < 256; ++i)
+  {
+    ssaoNoiseData[256 + i] = genRotation(random) * 2 * M_PI;
+  }
+
+  ssaoNoise.unmap();
 }
 
 void SimpleShadowmapRender::LoadScene(const char* path, bool transpose_inst_matrices)
@@ -91,6 +156,9 @@ void SimpleShadowmapRender::loadShaders()
   etna::create_program("simple_material",
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple_shadow.frag.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
   etna::create_program("simple_shadow", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
+
+  etna::create_program("ssao_overlay", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/ssao_overlay.comp.spv"});
+  etna::create_program("ssao_apply", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/ssao_apply.comp.spv"});
 }
 
 void SimpleShadowmapRender::SetupSimplePipeline()
@@ -109,7 +177,7 @@ void SimpleShadowmapRender::SetupSimplePipeline()
       .vertexShaderInput = sceneVertexInputDesc,
       .fragmentShaderOutput =
         {
-          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat())},
+          .colorAttachmentFormats = {vk::Format::eR32G32B32A32Sfloat},
           .depthAttachmentFormat = vk::Format::eD32Sfloat
         }
     });
@@ -121,6 +189,8 @@ void SimpleShadowmapRender::SetupSimplePipeline()
           .depthAttachmentFormat = vk::Format::eD16Unorm
         }
     });
+  m_ssaoOverlayPipeline = pipelineManager.createComputePipeline("ssao_overlay", {});
+  m_ssaoApplyPipeline = pipelineManager.createComputePipeline("ssao_apply", {});
 }
 
 
@@ -169,7 +239,7 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     DrawSceneCmd(a_cmdBuff, m_lightMatrix, m_shadowPipeline.getVkPipelineLayout());
   }
 
-  //// draw final scene to screen
+  //// draw final scene to a texture
   //
   {
     auto simpleMaterialInfo = etna::get_shader_program("simple_material");
@@ -183,7 +253,7 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     VkDescriptorSet vkSet = set.getVkSet();
 
     etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
-      {{.image = a_targetImage, .view = a_targetImageView}},
+      {{.image = mainView.get(), .view = mainView.getView({})}},
       {.image = mainViewDepth.get(), .view = mainViewDepth.getView({})});
 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_basicForwardPipeline.getVkPipeline());
@@ -191,6 +261,148 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
       m_basicForwardPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
 
     DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_basicForwardPipeline.getVkPipelineLayout());
+  }
+
+  if (m_enableSSAO)
+  {
+    {
+      etna::set_state(a_cmdBuff, mainViewDepth.get(), vk::PipelineStageFlagBits2::eComputeShader,
+          vk::AccessFlagBits2::eShaderRead, vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eDepth);
+      etna::set_state(a_cmdBuff, ssaoOverlay.get(), vk::PipelineStageFlagBits2::eComputeShader,
+          vk::AccessFlagBits2::eShaderWrite, vk::ImageLayout::eGeneral, vk::ImageAspectFlagBits::eColor);
+      etna::flush_barriers(a_cmdBuff);
+    
+      auto ssaoOverlayInfo = etna::get_shader_program("ssao_overlay");
+    
+      auto set = etna::create_descriptor_set(ssaoOverlayInfo.getDescriptorLayoutId(0), a_cmdBuff,
+      {
+        etna::Binding {0, mainViewDepth.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        etna::Binding {1, ssaoOverlay.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)},
+        etna::Binding {2, ssaoNoise.genBinding()}
+      });
+    
+      VkDescriptorSet vkSet = set.getVkSet();
+    
+      vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_ssaoOverlayPipeline.getVkPipeline());
+      vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_ssaoOverlayPipeline.getVkPipelineLayout(),
+          0, 1, &vkSet, 0, VK_NULL_HANDLE);
+    
+      pushConst2M.projView = m_worldViewProj;
+      vkCmdPushConstants(a_cmdBuff, m_ssaoOverlayPipeline.getVkPipelineLayout(),
+        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConst2M), &pushConst2M);
+    
+      vkCmdDispatch(a_cmdBuff, m_width, m_height, 1);
+    }
+    
+    {
+      etna::set_state(a_cmdBuff, mainView.get(), vk::PipelineStageFlagBits2::eComputeShader,
+          vk::AccessFlagBits2::eShaderRead, vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor);
+      etna::set_state(a_cmdBuff, ssaoOverlay.get(), vk::PipelineStageFlagBits2::eComputeShader,
+          vk::AccessFlagBits2::eShaderRead, vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor);
+      etna::set_state(a_cmdBuff, ssaoResult.get(), vk::PipelineStageFlagBits2::eComputeShader,
+          vk::AccessFlagBits2::eShaderWrite, vk::ImageLayout::eGeneral, vk::ImageAspectFlagBits::eColor);
+      etna::flush_barriers(a_cmdBuff);
+    
+      auto ssaoApplyInfo = etna::get_shader_program("ssao_apply");
+    
+      auto set = etna::create_descriptor_set(ssaoApplyInfo.getDescriptorLayoutId(0), a_cmdBuff,
+      {
+        etna::Binding {0, mainView.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        etna::Binding {1, mainViewDepth.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        etna::Binding {2, ssaoOverlay.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        etna::Binding {3, ssaoResult.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)}
+      });
+    
+      VkDescriptorSet vkSet = set.getVkSet();
+    
+      vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_ssaoApplyPipeline.getVkPipeline());
+      vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_ssaoApplyPipeline.getVkPipelineLayout(),
+          0, 1, &vkSet, 0, VK_NULL_HANDLE);
+    
+      vkCmdDispatch(a_cmdBuff, m_width, m_height, 1);
+    }
+    
+    {
+      etna::set_state(a_cmdBuff, ssaoResult.get(), vk::PipelineStageFlagBits2::eTransfer,
+          vk::AccessFlagBits2::eTransferRead, vk::ImageLayout::eTransferSrcOptimal, vk::ImageAspectFlagBits::eColor);
+      etna::set_state(a_cmdBuff, a_targetImage, vk::PipelineStageFlagBits2::eTransfer,
+          vk::AccessFlagBits2::eTransferWrite, vk::ImageLayout::eTransferDstOptimal, vk::ImageAspectFlagBits::eColor);
+      etna::flush_barriers(a_cmdBuff);
+    
+      vk::ImageBlit region =
+      {
+        .srcSubresource =
+          {
+            .aspectMask = vk::ImageAspectFlagBits::eColor,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+          },
+        .srcOffsets = std::array<vk::Offset3D, 2>
+          {
+            vk::Offset3D{0, 0, 0},
+            vk::Offset3D{static_cast<int32_t>(m_width), static_cast<int32_t>(m_height), 1}
+          },
+        .dstSubresource =
+          {
+            .aspectMask = vk::ImageAspectFlagBits::eColor,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+          },
+        .dstOffsets = std::array<vk::Offset3D, 2>
+          {
+            vk::Offset3D{0, 0, 0},
+            vk::Offset3D{static_cast<int32_t>(m_width), static_cast<int32_t>(m_height), 1}
+          },
+      };
+    
+      VkImageBlit vkRegion = region;
+    
+      vkCmdBlitImage(a_cmdBuff, ssaoResult.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+          a_targetImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &vkRegion, VK_FILTER_NEAREST);
+    }
+  }
+  else
+  {
+    etna::set_state(a_cmdBuff, mainView.get(), vk::PipelineStageFlagBits2::eTransfer,
+        vk::AccessFlagBits2::eTransferRead, vk::ImageLayout::eTransferSrcOptimal, vk::ImageAspectFlagBits::eColor);
+    etna::set_state(a_cmdBuff, a_targetImage, vk::PipelineStageFlagBits2::eTransfer,
+        vk::AccessFlagBits2::eTransferWrite, vk::ImageLayout::eTransferDstOptimal, vk::ImageAspectFlagBits::eColor);
+    etna::flush_barriers(a_cmdBuff);
+    
+    vk::ImageBlit region =
+    {
+      .srcSubresource =
+        {
+          .aspectMask = vk::ImageAspectFlagBits::eColor,
+          .mipLevel = 0,
+          .baseArrayLayer = 0,
+          .layerCount = 1
+        },
+      .srcOffsets = std::array<vk::Offset3D, 2>
+        {
+          vk::Offset3D{0, 0, 0},
+          vk::Offset3D{static_cast<int32_t>(m_width), static_cast<int32_t>(m_height), 1}
+        },
+      .dstSubresource =
+        {
+          .aspectMask = vk::ImageAspectFlagBits::eColor,
+          .mipLevel = 0,
+          .baseArrayLayer = 0,
+          .layerCount = 1
+        },
+      .dstOffsets = std::array<vk::Offset3D, 2>
+        {
+          vk::Offset3D{0, 0, 0},
+          vk::Offset3D{static_cast<int32_t>(m_width), static_cast<int32_t>(m_height), 1}
+        },
+    };
+    
+    VkImageBlit vkRegion = region;
+    
+    vkCmdBlitImage(a_cmdBuff, mainView.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        a_targetImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &vkRegion, VK_FILTER_NEAREST);
   }
 
   if(m_input.drawFSQuad)
