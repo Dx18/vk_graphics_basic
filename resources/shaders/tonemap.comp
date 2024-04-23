@@ -1,0 +1,20 @@
+#version 450
+
+layout (binding = 0) uniform sampler2D mainView;
+layout (binding = 1) writeonly uniform uimage2D mainViewTonemapped;
+
+void main()
+{
+    ivec2 pixelLocation = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 resultSize = imageSize(mainViewTonemapped);
+
+    if (pixelLocation.x >= resultSize.x || pixelLocation.y >= resultSize.y)
+    {
+        return;
+    }
+
+    vec3 color = texelFetch(mainView, pixelLocation, 0).rgb;
+
+    // TODO
+    imageStore(mainViewTonemapped, pixelLocation, uvec4(uvec3((vec3(1.0) - exp(-color * 0.2)) * 255.0), 255));
+}
