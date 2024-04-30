@@ -12,6 +12,7 @@ layout(push_constant) uniform params_t
 {
     mat4 mProjView;
     mat4 mModel;
+    vec4 objectColor;
 } params;
 
 
@@ -21,7 +22,6 @@ layout (location = 0 ) out VS_OUT
     vec3 wNorm;
     vec3 wTangent;
     vec2 texCoord;
-
 } vOut;
 
 out gl_PerVertex { vec4 gl_Position; };

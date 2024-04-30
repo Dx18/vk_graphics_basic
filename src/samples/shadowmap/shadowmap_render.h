@@ -47,6 +47,9 @@ private:
   etna::GlobalContext* m_context;
   etna::Image mainViewDepth;
   etna::Image shadowMap;
+  etna::Image shadowMapNormal;
+  etna::Image shadowMapFlux;
+  etna::Buffer samplePositions;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
 
@@ -67,6 +70,7 @@ private:
   {
     float4x4 projView;
     float4x4 model;
+    float4 objectColor;
   } pushConst2M;
 
   float4x4 m_worldViewProj;
@@ -76,6 +80,7 @@ private:
   void* m_uboMappedMem = nullptr;
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
+  etna::GraphicsPipeline m_reflectiveShadowPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
   
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
@@ -86,6 +91,8 @@ private:
   uint32_t m_height = 1024u;
   uint32_t m_framesInFlight = 2u;
   bool m_vsync = false;
+
+  bool m_enableRSM = false;
 
   vk::PhysicalDeviceFeatures m_enabledDeviceFeatures = {};
   std::vector<const char*> m_deviceExtensions;
