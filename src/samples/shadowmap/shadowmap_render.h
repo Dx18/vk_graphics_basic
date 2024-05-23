@@ -49,6 +49,15 @@ private:
   etna::Image shadowMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
+  
+  etna::Image atlas;
+  etna::Buffer atlasStagingBuffer;
+
+  etna::Buffer m_fireworkDirectorStateBuffer;
+  etna::Buffer m_particlesBuffer;
+  etna::Buffer m_fireworksBuffer;
+  etna::Buffer m_explosionParticlesInvokeParamsBuffer;
+  etna::Buffer m_explosionParticlesSpawnParamsBuffer;
 
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
@@ -77,6 +86,12 @@ private:
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
+
+  etna::GraphicsPipeline m_renderParticlesPipeline {};
+
+  etna::ComputePipeline m_fireworkDirectorPipeline {};
+  etna::ComputePipeline m_fireworkExplosionParticlesPipeline {};
+  etna::ComputePipeline m_updateParticlesPipeline {};
   
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
@@ -86,6 +101,18 @@ private:
   uint32_t m_height = 1024u;
   uint32_t m_framesInFlight = 2u;
   bool m_vsync = false;
+
+  const uint32_t m_fireworkCount = 16;
+  bool m_areFireworksInitialized = false;
+
+  struct FireworkDirectorParams
+  {
+    float launchPeriod;
+    float flyTime;
+    float explosionHeight;
+  };
+
+  FireworkDirectorParams m_fireworkDirectorParams = {.launchPeriod = 0.5, .flyTime = 1.9, .explosionHeight = 3.0};
 
   vk::PhysicalDeviceFeatures m_enabledDeviceFeatures = {};
   std::vector<const char*> m_deviceExtensions;

@@ -1,0 +1,58 @@
+#version 430
+#extension GL_GOOGLE_include_directive : require
+
+#include "particle.h"
+
+struct Firework
+{
+    vec4 launchCoordinates;
+
+    float timeSinceLaunch;
+    int state;
+};
+
+layout(push_constant) uniform FireworkDirectorParams
+{
+    float launchPeriod;
+    float flyTime;
+    float explosionHeight;
+} directorParams;
+
+layout(std430, binding = 0) buffer Particles
+{
+    // Each firework --- subarray of particles
+    // Firework particles layout: rocket (x1), trail (x25), main particles (x230)
+    Particle particles[];
+};
+
+layout(std430, binding = 1) buffer Fireworks
+{
+    Firework fireworks[];
+};
+
+layout(std430, binding = 2) buffer ExplosionParticlesSpawnParams
+{
+    int fireworkIndices[];
+} explosionParticlesSpawnParams;
+
+void main()
+{
+    int fireworkIndex = explosionParticlesSpawnParams.fireworkIndices[gl_GlobalInvocationID.x / 230];
+    int particleIndex = int(gl_GlobalInvocationID.x % 230);
+
+    float velocityYaw = particleIndex % 115 / 114.0 * 2.0 * 3.14159265359;
+    float velocityPitch = sin(particleIndex / 114.0 * 10.0 * 3.14159265359) * 3.14159265359 / 2.0;
+    
+    vec3 position = fireworks[fireworkIndex].launchCoordinates.xyz + vec3(0.0, directorParams.explosionHeight, 0.0);
+    vec3 velocity = vec3(cos(velocityYaw) * cos(velocityPitch), sin(velocityPitch), sin(velocityYaw) * cos(velocityPitch)) * (particleIndex < 115 ? 1.0 : 0.7);
+    vec2 uvBegin = vec2(9.0, 9.0) / 16.0;
+    vec2 uvEnd = vec2(16.0, 16.0) / 16.0;
+    vec3 color = vec3(mix(vec3(184, 219, 86) / 255.0, vec3(219, 111, 57) / 255.0, pow(particleIndex * 37 % 230 / 229.0, 0.5)));
+    float mass = 0.1;
+    float size = 0.035;
+    float remainingLifetime = 0.3 + 0.4 * pow(particleIndex * 131 % 230 / 229.0, 2.0);
+
+    Particle newParticle = constructParticle(position, velocity, uvBegin, uvEnd, color, mass, size, remainingLifetime);
+
+    particles[fireworkIndex * 256 + 26 + particleIndex] = newParticle;
+}

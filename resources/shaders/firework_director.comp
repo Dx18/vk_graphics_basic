@@ -1,0 +1,167 @@
+#version 430
+#extension GL_GOOGLE_include_directive : require
+
+#include "common.h"
+
+#include "particle.h"
+
+struct Firework
+{
+    vec4 launchCoordinates;
+
+    float timeSinceLaunch;
+    int state;
+};
+
+layout(push_constant) uniform FireworkDirectorParams
+{
+    float launchPeriod;
+    float flyTime;
+    float explosionHeight;
+} directorParams;
+
+layout(std140, binding = 0) uniform AppData
+{
+    UniformParams params;
+};
+
+layout(std430, binding = 1) buffer FireworkDirectorState
+{
+    float timeUntilNextLaunch;
+    int nextFireworkIndex;
+    int maxFireworkIndex;
+};
+
+layout(std430, binding = 2) buffer Particles
+{
+    // Each firework --- subarray of particles
+    // Firework particles layout: rocket (x1), trail (x25), main particles (x230)
+    Particle particles[];
+};
+
+layout(std430, binding = 3) buffer Fireworks
+{
+    Firework fireworks[];
+};
+
+layout(std430, binding = 4) buffer ExplosionParticlesInvokeParams
+{
+    uint count;
+    uint _temp1;
+    uint _temp2;
+} explosionParticlesInvokeParams;
+
+layout(std430, binding = 5) buffer ExplosionParticlesSpawnParams
+{
+    int fireworkIndices[];
+} explosionParticlesSpawnParams;
+
+void spawnRocketParticle(int index)
+{
+    float velocityY = directorParams.explosionHeight / directorParams.flyTime;
+
+    vec3 position = fireworks[index].launchCoordinates.xyz;
+    vec3 velocity = vec3(0.0, velocityY, 0.0);
+    vec2 uvBegin = vec2(0.0, 3.0) / 16.0;
+    vec2 uvEnd = vec2(8.0, 16.0) / 16.0;
+    vec3 color = vec3(1.0);
+    float mass = 0.0;
+    float size = 0.065;
+    float remainingLifetime = directorParams.flyTime;
+
+    Particle newParticle = constructParticle(position, velocity, uvBegin, uvEnd, color, mass, size, remainingLifetime);
+
+    particles[256 * index] = newParticle;
+}
+
+void spawnExplosionParticles(int index)
+{
+    explosionParticlesSpawnParams.fireworkIndices[explosionParticlesInvokeParams.count] = index;
+    ++explosionParticlesInvokeParams.count;
+}
+
+void spawnTrailParticle(int index, int particleIndex)
+{
+    float positionY = directorParams.explosionHeight / 25 * particleIndex;
+    float velocityYaw = (particleIndex * 17) % 25 / 24.0 * 2.0 * 3.14159265359;
+    
+    vec3 position = fireworks[index].launchCoordinates.xyz + vec3(0.0, positionY, 0.0);
+    vec3 velocity = vec3(cos(velocityYaw), 0.0, sin(velocityYaw)) * 0.10;
+    vec2 uvBegin = vec2(9.0, 9.0) / 16.0;
+    vec2 uvEnd = vec2(16.0, 16.0) / 16.0;
+    vec3 color = vec3(1.0);
+    float mass = 0.1;
+    float size = 0.035;
+    float remainingLifetime = 0.4 + int(fireworks[index].timeSinceLaunch * 1000000.0) % 10 * 0.1;
+
+    Particle newParticle = constructParticle(position, velocity, uvBegin, uvEnd, color, mass, size, remainingLifetime);
+
+    particles[index * 256 + 1 + particleIndex] = newParticle;
+}
+
+void launchFirework()
+{
+    Firework newFirework;
+
+    float launchX = int(timeUntilNextLaunch * 10000.0) % 20 * 0.1 - 0.95;
+    float launchZ = int(timeUntilNextLaunch * 1000000.0) % 20 * 0.1 - 0.95;
+
+    newFirework.launchCoordinates = vec4(launchX, 0.0, launchZ, 0.0);
+    newFirework.timeSinceLaunch = 0.0;
+    newFirework.state = 0;
+    
+    fireworks[nextFireworkIndex] = newFirework;
+
+    spawnTrailParticle(nextFireworkIndex, 0);
+    spawnRocketParticle(nextFireworkIndex);
+    
+    maxFireworkIndex = max(maxFireworkIndex, nextFireworkIndex);
+    nextFireworkIndex = (nextFireworkIndex + 1) % fireworks.length();
+    timeUntilNextLaunch = directorParams.launchPeriod;
+}
+
+void updateFirework(int index)
+{
+    Firework firework = fireworks[index];
+
+    firework.timeSinceLaunch += params.timeDelta;
+
+    int expectedState = min(25, int(firework.timeSinceLaunch / directorParams.flyTime * 25));
+
+    if (firework.state != expectedState)
+    {
+        if (expectedState == 25)
+        {
+            spawnExplosionParticles(index);
+        }
+        else
+        {
+            spawnTrailParticle(index, expectedState);
+        }
+
+        firework.state = expectedState;
+    }
+
+    fireworks[index] = firework;
+}
+
+void main()
+{
+    explosionParticlesInvokeParams.count = 0;
+    explosionParticlesInvokeParams._temp1 = 1;
+    explosionParticlesInvokeParams._temp2 = 1;
+
+    timeUntilNextLaunch -= params.timeDelta;
+
+    if (timeUntilNextLaunch < 0.0)
+    {
+        launchFirework();
+    }
+
+    for (int i = 0; i <= maxFireworkIndex; ++i)
+    {
+        updateFirework(i);
+    }
+    
+    explosionParticlesInvokeParams.count *= 230;
+}
