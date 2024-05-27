@@ -63,7 +63,11 @@ void main()
 
   vec3 sampleSum = vec3(0.0);
 
-  RSMPixelData pixelData = getRSMPixelData(shadowTexCoord);
+  vec3 position = surf.wPos;
+  vec3 normal = normalize(surf.wNorm.xyz);
+
+  vec3 lightDirection = (inverse(Params.lightMatrix) * vec4(0.0, 0.0, 1.0, 0.0)).xyz;
+  vec3 flux = max(0.0, dot(-lightDirection, normal)) * params.objectColor.rgb;
 
   for (int i = 0; i < 800; ++i)
   {
@@ -73,14 +77,14 @@ void main()
 
     RSMPixelData currPixelData = getRSMPixelData(currShadowTexCoord);
 
-    vec3 positionOffset = pixelData.position - currPixelData.position;
+    vec3 positionOffset = position - currPixelData.position;
     sampleSum += currPixelData.flux * dot(offset, offset) *
         max(0.0, dot(currPixelData.normal, positionOffset)) *
-        max(0.0, dot(pixelData.normal, -positionOffset)) /
+        max(0.0, dot(normal, -positionOffset)) /
         pow(dot(positionOffset, positionOffset), 2.0);
   }
   
   vec3 lightDir   = normalize(Params.lightPos - surf.wPos);
-  vec3 color = (max(dot(surf.wNorm, lightDir), 0.0) * shadow + vec3(0.1)) * params.objectColor.rgb;
+  vec3 color = (max(dot(surf.wNorm, lightDir), 0.0) * shadow + vec3(0.1)) * flux;
   out_fragColor = vec4(color + 0.4 * sampleSum, 1.0);
 }
